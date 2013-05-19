@@ -194,3 +194,4 @@ exports.BattleAbilities = {
 		num: 100
 	}
 };
+/* There's an error on line 186. According to CMD, the error is on the lines after move priority for stall "}," is what it said in cmd. ~iSmogoon
