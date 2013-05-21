@@ -27,6 +27,15 @@ for (var i = 0; i < tourTierList.length; i++) {
 	tourTierString = tourTierString + tourTierList[i];
 	}
 }
+	
+var allMoney = new Array();
+//NOTE: THE BELOW CODE WILL AUTOMATICALLY IMPORT CASHMONEYDATAS.  CHANGE TO FALSE
+var importMoney = true;
+
+if (importMoney = true) {
+	restoreMoneySync();
+}
+
 /**
  * `parseCommand`. This is the function most of you are interested in,
  * apparently.
@@ -123,7 +132,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		}
 		return false;
 		break;
-		
+
 	case 'me':
 	case 'mee':
 		if (canTalk(user, room)) {
@@ -135,88 +144,17 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			return true;
 		}
 		break;
-		
-	case 'hailnollan':
-	case 'nollanisking':
-		if (!user.can('broadcast')) {
-			emit(socket, 'console', '/hailnollan - Access denied.');
+
+	case '!birkal':
+	case 'birkal':
+		if (canTalk(user, room) && user.can('broadcast') && room.id === 'lobby') {
+			if (cmd === '!birkal') {
+				room.add('|c|'+user.getIdentity()+'|!birkal '+target, true);
+			}
+			room.logEntry(user.name + ' used /birkal ' + target);
+			room.add('|c| Birkal|/me '+target, true);
 			return false;
 		}
-		logModCommand(room, 'Nollan was hailed by ' + user.name + '.', true);
-		room.addRaw('<div class="broadcast-blue"><b>All hail King Nollan!</b><br />King of the world, destroyer of all that defy him!</div>');
-		return false;
-		break;
-		
-	case 'namelock':
-	case 'nl':
-		if(!target) {
-			return false;
-		}
-		var targets = splitTarget(target);
-		var targetUser = targets[0];
-		var targetName = targets[1] || (targetUser && targetUser.name);
-		if (!user.can('namelock', targetUser)) {
-			emit(socket, 'console', '/namelock - access denied.');
-			return false;
-		} else if (targetUser && targetName) {
-			var oldname = targetUser.name;
-			var targetId = toUserid(targetName);
-			var userOfName = Users.users[targetId];
-			var isAlt = false;
-			if (userOfName) {
-				for(var altName in userOfName.getAlts()) {
-					var altUser = Users.users[toUserid(altName)];
-					if (!altUser) continue;
-					if (targetId === altUser.userid) {
-						isAlt = true;
-						break;
-					}
-					for (var prevName in altUser.prevNames) {
-						if (targetId === toUserid(prevName)) {
-							isAlt = true;
-							break;
-						}
-					}
-					if (isAlt) break;
-				}
-			}
-			if (!userOfName || oldname === targetName || isAlt) {
-				targetUser.nameLock(targetName, true);
-			}
-			if (targetUser.nameLocked()) {
-				logModCommand(room,user.name+" name-locked "+oldname+" to "+targetName+".");
-				return false;
-			}
-			emit(socket, 'console', oldname+" can't be name-locked to "+targetName+".");
-		} else {
-			emit(socket, 'console', "User "+targets[2]+" not found.");
-		}
-		return false;
-		break;
-	case 'nameunlock':
-	case 'unnamelock':
-	case 'nul':
-	case 'unl':
-		if(!user.can('namelock') || !target) {
-			return false;
-		}
-		var removed = false;
-		for (var i in nameLockedIps) {
-			if (nameLockedIps[i] === target) {
-				delete nameLockedIps[i];
-				removed = true;
-			}
-		}
-		if (removed) {
-			var targetUser = Users.get(target);
-			if (targetUser) {
-				Rooms.lobby.sendIdentity(targetUser);
-			}
-			logModCommand(room,user.name+" unlocked the name of "+target+".");
-		} else {
-			emit(socket, 'console', target+" not found.");
-		}
-		return false;
 		break;
 
 	case 'forfeit':
@@ -251,7 +189,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		user.avatar = avatar;
 		if (!parts[1]) {
 			emit(socket, 'console', 'Avatar changed to:');
-			emit(socket, 'console', {rawMessage: '<img src="/sprites/trainers/'+avatar+'.png" alt="" width="80" height="80" />'});
+			emit(socket, 'console', {rawMessage: '<img src="//play.pokemonshowdown.com/sprites/trainers/'+avatar+'.png" alt="" width="80" height="80" />'});
 		}
 
 		return false;
@@ -308,6 +246,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			var output = 'In rooms: ';
 			var first = true;
 			for (var i in targetUser.roomCount) {
+				if (i === 'global') continue;
 				if (!first) output += ' | ';
 				first = false;
 
@@ -373,6 +312,63 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		return false;
 		break;
 
+	case 'lock':
+	case 'ipmute':
+		if (!target) return parseCommand(user, '?', cmd, room, socket);
+		var targets = splitTarget(target);
+		var targetUser = targets[0];
+		if (!targetUser) {
+			emit(socket, 'console', 'User '+targets[2]+' not found.');
+			return false;
+		}
+		if (!user.can('lock', targetUser)) {
+			emit(socket, 'console', '/lock - Access denied.');
+			return false;
+		}
+
+		logModCommand(room,""+targetUser.name+" was locked from talking by "+user.name+"." + (targets[1] ? " (" + targets[1] + ")" : ""));
+		targetUser.emit('message', user.name+' has locked you from talking in chats, battles, and PMing regular users.\n\n'+targets[1]+'\n\nIf you feel that your lock was unjustified, you can still PM staff members (@, &, and ~) to discuss it.');
+		var alts = targetUser.getAlts();
+		if (alts.length) logModCommand(room,""+targetUser.name+"'s alts were also locked: "+alts.join(", "));
+
+		targetUser.lock();
+
+		Rooms.lobby.sendIdentity(targetUser);
+		for (var i=0; i<alts.length; i++) {
+			var targetAlt = Users.get(alts[i]);
+			if (targetAlt) {
+				Rooms.lobby.sendIdentity(targetAlt);
+			}
+		}
+		return false;
+		break;
+
+	case 'unlock':
+		if (!target) return parseCommand(user, '?', cmd, room, socket);
+		if (!user.can('lock')) {
+			emit(socket, 'console', '/unlock - Access denied.');
+			return false;
+		}
+
+		var unlocked = Users.unlock(target);
+
+		if (unlocked) {
+			var names = Object.keys(unlocked);
+			logModCommand(room, '' + names.join(', ') + ' ' +
+					((names.length > 1) ? 'were' : 'was') +
+					' unlocked by ' + user.name + '.');
+			for (var i = 0; i < names.length; ++i) {
+				var unlockedUser = Users.get(names[i]);
+				if (unlockedUser) {
+					Rooms.lobby.sendIdentity(unlockedUser);
+				}
+			}
+		} else {
+			emit(socket, 'console', 'User '+target+' is not locked.');
+		}
+		return false;
+		break;
+
 	case 'unban':
 		if (!target) return parseCommand(user, '?', cmd, room, socket);
 		if (!user.can('ban')) {
@@ -380,17 +376,10 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			return false;
 		}
 
-		var targetid = toUserid(target);
-		var success = false;
+		var name = Users.unban(target);
 
-		for (var ip in bannedIps) {
-			if (bannedIps[ip] === targetid) {
-				delete bannedIps[ip];
-				success = true;
-			}
-		}
-		if (success) {
-			logModCommand(room,''+target+' was unbanned by '+user.name+'.');
+		if (name) {
+			logModCommand(room,''+name+' was unbanned by '+user.name+'.');
 		} else {
 			emit(socket, 'console', 'User '+target+' is not banned.');
 		}
@@ -402,9 +391,14 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			emit(socket, 'console', '/unbanall - Access denied.');
 			return false;
 		}
-		logModCommand(room,'All bans and ip mutes have been lifted by '+user.name+'.');
-		bannedIps = {};
-		mutedIps = {};
+		// we have to do this the hard way since it's no longer a global
+		for (var i in Users.bannedIps) {
+			delete Users.bannedIps[i];
+		}
+		for (var i in Users.lockedIps) {
+			delete Users.lockedIps[i];
+		}
+		logModCommand(room,'All bans and locks have been lifted by '+user.name+'.');
 		return false;
 		break;
 
@@ -437,11 +431,11 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			}
 			return parseCommand(user, '?', cmd, room, socket);
 		}
-		// temporarily disable this because blarajan
-		/* if (user.muted && !targetUser.can('mute', user)) {
-			emit(socket, 'console', 'You can only private message members of the Moderation Team (users marked by %, @, &, or ~) when muted.');
+
+		if (user.locked && !targetUser.can('lock', user)) {
+			emit(socket, 'console', 'You can only private message members of the moderation team (users marked by %, @, &, or ~) when locked.');
 			return false;
-		} */
+		}
 
 		if (!user.named) {
 			emit(socket, 'console', 'You must choose a name before you can send private messages.');
@@ -454,7 +448,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			message: targets[1]
 		};
 		user.emit('console', message);
-		targets[0].emit('console', message);
+		if (targets[0] !== user) targets[0].emit('console', message);
 		targets[0].lastPM = user.userid;
 		user.lastPM = targets[0].userid;
 		return false;
@@ -473,6 +467,10 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			emit(socket, 'console', '/mute - Access denied.');
 			return false;
 		}
+		if (room.id !== 'lobby') {
+			emit(socket, 'console', 'Muting only applies to lobby - you probably wanted to /lock.');
+			return false;
+		}
 
 		logModCommand(room,''+targetUser.name+' was muted by '+user.name+'.' + (targets[1] ? " (" + targets[1] + ")" : ""));
 		targetUser.emit('message', user.name+' has muted you. '+targets[1]);
@@ -481,38 +479,6 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 
 		targetUser.muted = true;
 		Rooms.lobby.sendIdentity(targetUser);
-		for (var i=0; i<alts.length; i++) {
-			var targetAlt = Users.get(alts[i]);
-			if (targetAlt) {
-				targetAlt.muted = true;
-				Rooms.lobby.sendIdentity(targetAlt);
-			}
-		}
-
-		return false;
-		break;
-
-	case 'ipmute':
-		if (!target) return parseCommand(user, '?', cmd, room, socket);
-		var targetUser = Users.get(target);
-		if (!targetUser) {
-			emit(socket, 'console', 'User '+target+' not found.');
-			return false;
-		}
-		if (!user.can('mute', targetUser)) {
-			emit(socket, 'console', '/ipmute - Access denied.');
-			return false;
-		}
-
-		logModCommand(room,''+targetUser.name+"'s IP was muted by "+user.name+'.');
-		var alts = targetUser.getAlts();
-		if (alts.length) logModCommand(room,""+targetUser.name+"'s alts were also muted: "+alts.join(", "));
-
-		targetUser.muted = true;
-		Rooms.lobby.sendIdentity(targetUser);
-		for (var ip in targetUser.ips) {
-			mutedIps[ip] = targetUser.userid;
-		}
 		for (var i=0; i<alts.length; i++) {
 			var targetAlt = Users.get(alts[i]);
 			if (targetAlt) {
@@ -536,19 +502,6 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		if (!user.can('mute', targetUser)) {
 			emit(socket, 'console', '/unmute - Access denied.');
 			return false;
-		}
-
-		var success = false;
-
-		for (var ip in mutedIps) {
-			if (mutedIps[ip] === targetid) {
-				delete mutedIps[ip];
-				success = true;
-			}
-		}
-
-		if (success) {
-			logModCommand(room,''+(targetUser?targetUser.name:target)+"'s IP was unmuted by "+user.name+'.');
 		}
 
 		targetUser.muted = false;
@@ -640,6 +593,11 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		case 'on':
 		case 'true':
 		case 'yes':
+			emit(socket, 'console', "If you're dealing with a spammer, make sure to run /loadbanlist first.");
+			emit(socket, 'console', "That said, the command you've been looking for has been renamed to: /modchat registered");
+			return false;
+			break;
+		case 'registered':
 			config.modchat = true;
 			break;
 		case 'off':
@@ -649,8 +607,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			break;
 		default:
 			if (!config.groups[target]) {
-				emit(socket, 'console', 'That moderated chat setting is unrecognized.');
-				return false;
+				return parseCommand(user, 'help', 'modchat', room, socket);
 			}
 			if (config.groupsranking.indexOf(target) > 1 && !user.can('modchatall')) {
 				emit(socket, 'console', '/modchat - Access denied for setting higher than ' + config.groupsranking[1] + '.');
@@ -735,20 +692,6 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		}
 		fs.writeFile('data/learnsets.js', 'exports.BattleLearnsets = '+JSON.stringify(BattleLearnsets)+";\n");
 		emit(socket, 'console', 'learnsets.js saved.');
-		return false;
-		break;
-
-	case 'rating':
-	case 'ranking':
-	case 'rank':
-	case 'ladder':
-		emit(socket, 'console', 'You are using an old version of Pokemon Showdown. Please reload the page.');
-		return false;
-		break;
-
-	case 'nick':
-		if (!target) return parseCommand(user, '?', cmd, room, socket);
-		user.rename(target);
 		return false;
 		break;
 
@@ -1086,18 +1029,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			'</div>');
 		return false;
 		break;
-	
-	case 'npm':
-	case '!npm':
-		showOrBroadcastStart(user, cmd, room, socket, message);
-		showOrBroadcast(user, cmd, room, socket,
-			'<div class="infobox">NPM is a pokemon modifier that tests the strengths and weaknesses of new typings while balancing and adding a sprinkle of flavor to the metagame:<br />' +
-			'- <a href="http://pastebin.com/R5AzvA4f" target="_blank">NPM information and changelist</a><br />' +
-			'- <a href="http://piratepad.net/NPMOU" target="_blank">If you have comments, suggestions, or questions, put them here</a><br />' +
-			'</div>');
-		return false;
-		break;
-		
+
 	case 'om':
 	case 'othermetas':
 	case '!om':
@@ -1125,9 +1057,21 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			matched = true;
 			buffer += '- <a href="http://www.smogon.com/forums/showthread.php?t=3479358" target="_blank">Tier Shift</a><br />';
 		}
-		if (target === 'all' || target === 'statexchange' || target === 'statex') {
+		if (target === 'all' || target === 'seasonalladder' || target === 'seasonal') {
 			matched = true;
-			buffer += '- <a href="http://www.smogon.com/forums/showthread.php?t=3482791" target="_blank">Stat Exchange</a>';
+			buffer += '- <a href="http://www.smogon.com/sim/seasonal" target="_blank">Seasonal Ladder</a><br />';
+		}
+		if (target === 'all' || target === 'smogondoubles' || target === 'doubles') {
+			matched = true;
+			buffer += '- <a href="http://www.smogon.com/forums/showthread.php?t=3476469" target="_blank">Smogon Doubles</a><br />';
+		}
+		if (target === 'all' || target === 'vgc2013' || target === 'vgc') {
+			matched = true;
+			buffer += '- <a href="http://www.smogon.com/forums/showthread.php?t=3471161" target="_blank">VGC 2013</a><br />';
+		}
+		if (target === 'all' || target === 'omotm' || target === 'omofthemonth' || target === 'month') {
+			matched = true;
+			buffer += '- <a href="http://www.smogon.com/forums/showthread.php?t=3481155" target="_blank">OM of the Month</a>';
 		}
 		if (!matched) {
 			emit(socket, 'console', 'The Other Metas entry "'+target+'" was not found. Try /othermetas or /om for general help.');
@@ -1337,11 +1281,11 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 
 	case 'join':
 		var targetRoom = Rooms.get(target);
-		if (!targetRoom) {
+		if (target && !targetRoom) {
 			emit(socket, 'console', "The room '"+target+"' does not exist.");
 			return false;
 		}
-		if (!user.joinRoom(targetRoom, socket)) {
+		if (!user.joinRoom(targetRoom || room, socket)) {
 			emit(socket, 'console', "The room '"+target+"' could not be joined (most likely, you're already in it).");
 			return false;
 		}
@@ -1351,8 +1295,12 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 	case 'leave':
 	case 'part':
 		if (room.id === 'global') return false;
-
-		user.leaveRoom(room, socket);
+		var targetRoom = Rooms.get(target);
+		if (target && !targetRoom) {
+			emit(socket, 'console', "The room '"+target+"' does not exist.");
+			return false;
+		}
+		user.leaveRoom(targetRoom || room, socket);
 		return false;
 		break;
 
@@ -1486,13 +1434,13 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		break;
 
 	case 'joinbattle':
-	case 'partbattle':
 		if (!room.joinBattle) { emit(socket, 'console', 'You can only do this in battle rooms.'); return false; }
 
 		room.joinBattle(user);
 		return false;
 		break;
 
+	case 'partbattle':
 	case 'leavebattle':
 		if (!room.leaveBattle) { emit(socket, 'console', 'You can only do this in battle rooms.'); return false; }
 
@@ -1551,10 +1499,11 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 	case 'lobbychat':
 		target = toId(target);
 		if (target === 'off') {
-			user.blockLobbyChat = true;
+			user.leaveRoom(Rooms.lobby, socket);
+			sendData(socket, '|users|');
 			emit(socket, 'console', 'You are now blocking lobby chat.');
 		} else {
-			user.blockLobbyChat = false;
+			user.joinRoom(Rooms.lobby, socket);
 			emit(socket, 'console', 'You are now receiving lobby chat.');
 		}
 		return false;
@@ -1678,7 +1627,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		break;
 
 	case 'loadbanlist':
-		if (!user.can('declare')) {
+		if (!user.can('modchat')) {
 			emit(socket, 'console', '/loadbanlist - Access denied.');
 			return false;
 		}
@@ -1688,7 +1637,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			if (err) return;
 			data = (''+data).split("\n");
 			for (var i=0; i<data.length; i++) {
-				if (data[i]) bannedIps[data[i]] = '#ipban';
+				if (data[i]) Users.bannedIps[data[i]] = '#ipban';
 			}
 			emit(socket, 'console', 'banned '+i+' ips');
 		});
@@ -1733,7 +1682,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 					// `git` on the PATH (which would be error.code === 127).
 					user.emit('console', '' + error);
 					logQueue.push('' + error);
-					logQueue.forEach(Rooms.lobby.logEntry);
+					logQueue.forEach(Rooms.lobby.logEntry.bind(Rooms.lobby));
 					updateServerLock = false;
 					return;
 				}
@@ -1746,7 +1695,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 					user.emit('console', s);
 					logQueue.push(s);
 				});
-				logQueue.forEach(Rooms.lobby.logEntry);
+				logQueue.forEach(Rooms.lobby.logEntry.bind(Rooms.lobby));
 				updateServerLock = false;
 			});
 		});
@@ -2019,14 +1968,6 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			matched = true;
 			emit(socket, 'console', '/demote [username], [group] - Demotes the user to the specified group or previous ranked group. Requires: & ~');
 		}
-		if (target === '&' || target === 'namelock' || target === 'nl') {
-			matched = true;
-			emit(socket, 'console', '/namelock OR /nl [username] - Prevents the user from changing their name. Requires: & ~');
-		}
-		if (target === '&' || target === 'unnamelock') {
-			matched = true;
-			emit(socket, 'console', '/unnamelock - Removes namelock from user. Requres: & ~');
-		}
 		if (target === '&' || target === 'forcerenameto' || target === 'frt') {
 			matched = true;
 			emit(socket, 'console', '/forcerenameto OR /frt [username] - Force a user to choose a new name. Requires: & ~');
@@ -2050,7 +1991,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		}
 		if (target === '@' || target === 'modchat') {
 			matched = true;
-			emit(socket, 'console', '/modchat [on/off/+/%/@/&/~] - Set the level of moderated chat. Requires: @ & ~');
+			emit(socket, 'console', '/modchat [off/registered/+/%/@/&/~] - Set the level of moderated chat. Requires: @ & ~');
 		}
 		if (target === '~' || target === 'hotpatch') {
 			matched = true;
@@ -2079,7 +2020,7 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 			if (user.group !== config.groupsranking[0]) {
 				emit(socket, 'console', 'DRIVER COMMANDS: /mute, /unmute, /announce, /forcerename, /alts')
 				emit(socket, 'console', 'MODERATOR COMMANDS: /ban, /unban, /unbanall, /ip, /modlog, /redirect, /kick');
-				emit(socket, 'console', 'LEADER COMMANDS: /promote, /demote, /forcerenameto, /namelock, /nameunlock, /forcewin, /forcetie, /declare');
+				emit(socket, 'console', 'LEADER COMMANDS: /promote, /demote, /forcerenameto, /forcewin, /forcetie, /declare');
 				emit(socket, 'console', 'For details on all moderator commands, use /help @');
 			}
 			emit(socket, 'console', 'For details of a specific command, use something like: /help data');
@@ -2088,43 +2029,6 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 		}
 		return false;
 		break;
-
-	default:
-		// Check for mod/demod/admin/deadmin/etc depending on the group ids
-		for (var g in config.groups) {
-			if (cmd === config.groups[g].id) {
-				return parseCommand(user, 'promote', toUserid(target) + ',' + g, room, socket);
-			} else if (cmd === 'de' + config.groups[g].id || cmd === 'un' + config.groups[g].id) {
-				var nextGroup = config.groupsranking[config.groupsranking.indexOf(g) - 1];
-				if (!nextGroup) nextGroup = config.groupsranking[0];
-				return parseCommand(user, 'demote', toUserid(target) + ',' + nextGroup, room, socket);
-			}
-		}
-	}
-
-	if (message.substr(0,1) === '/' && cmd) {
-		// To guard against command typos, we now emit an error message
-		emit(socket, 'console', 'The command "/'+cmd+'" was unrecognized. To send a message starting with "/'+cmd+'", type "//'+cmd+'".');
-		return false;
-	}
-
-	// chat moderation
-	if (!canTalk(user, room, socket)) {
-		return false;
-	}
-
-	// hardcoded low quality website
-	if (/\bnimp\.org\b/i.test(message)) return false;
-
-	// remove zalgo
-	message = message.replace(/[\u0300-\u036f]{3,}/g,'');
-
-	if (config.chatfilter) {
-		return config.chatfilter(user, room, socket, message);
-	}
-
-	return message;
-}
 	/*
 		Well, here's the new location of the tournament commands.  Hopefully it'll cause fewer issues by being at the end of the code rather than just at the beginning.
 		TOURCOMMANDS
@@ -2592,18 +2496,19 @@ function parseCommandLocal(user, cmd, target, room, socket, message) {
 
 	return message;
 }
+
 /**
  * Can this user talk?
  * Pass the corresponding socket to give the user an error, if not
  */
 function canTalk(user, room, socket) {
 	if (!user.named) return false;
-	if (user.muted) {
-		if (socket) emit(socket, 'console', 'You are muted.');
+	if (user.locked) {
+		if (socket) emit(socket, 'console', 'You are locked from talking in chat.');
 		return false;
 	}
-	if (room.id === 'lobby' && user.blockLobbyChat) {
-		if (socket) emit(socket, 'console', "You can't send messages while blocking lobby chat.");
+	if (user.muted && room.id === 'lobby') {
+		if (socket) emit(socket, 'console', 'You are muted and cannot talk in the lobby.');
 		return false;
 	}
 	if (config.modchat && room.id === 'lobby') {
@@ -3055,6 +2960,8 @@ function getTourColor(target) {
 	return '<b><font color="red">'+target+'</font></b>';
 	}
 }
+
+
 
 parseCommandLocal.serverVersion = parseCommandLocal.computeServerVersion();
 
