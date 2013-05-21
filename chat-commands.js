@@ -27,15 +27,6 @@ for (var i = 0; i < tourTierList.length; i++) {
 	tourTierString = tourTierString + tourTierList[i];
 	}
 }
-	
-var allMoney = new Array();
-//NOTE: THE BELOW CODE WILL AUTOMATICALLY IMPORT CASHMONEYDATAS.  CHANGE TO FALSE
-var importMoney = true;
-
-if (importMoney = true) {
-	restoreMoneySync();
-}
-
 /**
  * `parseCommand`. This is the function most of you are interested in,
  * apparently.
